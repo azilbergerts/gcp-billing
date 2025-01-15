@@ -1,3 +1,7 @@
+-- select * from apt-decorator-672.analytics_281802471.events_20250110
+-- union all
+-- select * from apt-decorator-672.analytics_261833206.events_20250110
+
 
 -- ETL Query Cost calculation Per Month (GA JOBS EXLUDED)
 -- Free Tier - 1TB of queries is free
@@ -17,11 +21,13 @@ with costs as (
 select * from (
 SELECT creation_time,
 EXTRACT(MONTH from DATETIME(creation_time, timezone)) month, 
+EXTRACT(YEAR from DATETIME(creation_time, timezone)) year, 
     project_id, destination_table.dataset_id, destination_table.table_id, user_email, query,
     sum(total_bytes_processed)/1e+12 processed_TB, sum(IFNULL(total_bytes_billed,0))/1e+12  billed_TB, 
     IF(SUM(IFNULL(total_bytes_billed,0))/1e+12 < 1, 0, (SUM(IFNULL(total_bytes_billed,0))/1e+12-1)  *.02) total_cost,
 
-    IF(cache_hit != true, SUM(ROUND(total_bytes_processed * cost_factor,4)), 0) as cost_in_dollar,
+    -- IF(cache_hit != true, SUM(ROUND(total_bytes_processed * cost_factor,4)), 0) as cost_in_dollar,
+     SUM(ROUND(total_bytes_processed * cost_factor )) as cost_in_dollar
  FROM
   `region-us.INFORMATION_SCHEMA.JOBS` --, unnest(labels) labels. --JOBS, JOBS_BY_USER, JOBS_BY_ORGANIZATION
 WHERE
@@ -29,18 +35,18 @@ WHERE
                   'firebase-measurement@system.gserviceaccount.com') --these are GA and GA4
   AND EXTRACT(date FROM creation_time) >='2024-05-17' 
 --  and REGEXP_CONTAINS(job_id,  'script_job_|bqts_|scheduled_query_') -- tried to exclude window queries - ?
-GROUP by 1,2,3 ,4 ,5,6,7,cache_hit--,error_result.message
+GROUP by  all --1,2,3 ,4 ,5,6,7,cache_hit--,error_result.message
 )
 where cost_in_dollar >0
 ORDER  by creation_time desc --,creation_time desc
 
 )
 
-select *
--- creation_time, -- month, EXTRACT(DAY from DATETIME(creation_time, timezone)), user_email,dataset_id, 
--- sum(cost_in_dollar)
+select 
+month, year, user_email,dataset_id, 
+sum(cost_in_dollar)
 from costs
-where
+-- where
 -- user_email like 'alina%' and
- query like   '%ga_sessions_us%' --'%CREATE OR REPLACE%'
+--  query like   '%ga_sessions_us%' --'%CREATE OR REPLACE%'
 group by all
