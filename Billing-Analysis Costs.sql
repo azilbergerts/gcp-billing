@@ -13,7 +13,7 @@
 DECLARE timezone STRING DEFAULT  'America/New_York'; --"Europe/Berlin";
 DECLARE gb_divisor INT64 DEFAULT 1024*1024*1024;
 DECLARE tb_divisor INT64 DEFAULT gb_divisor*1024;
-DECLARE cost_per_tb_in_dollar INT64 DEFAULT 5;
+DECLARE cost_per_tb_in_dollar INT64 DEFAULT 6.25;
 DECLARE cost_factor FLOAT64 DEFAULT cost_per_tb_in_dollar / tb_divisor;
 
 -- SELECT 5/1099511627776 --(1024*1024*1024*1024)
