@@ -1,0 +1,94 @@
+
+
+-- MAJ Vertext AI Query Cost calculation Per Day 
+-- 1 TB = 1e+12 KB
+
+# Monitor Query costs in BigQuery; standard-sql; 2020-06-21
+# @see http://www.pascallandau.com/bigquery-snippets/monitor-query-costs/
+
+DECLARE timezone STRING DEFAULT  'America/Chicago'; --"Europe/Berlin";
+DECLARE gb_divisor FLOAT64 DEFAULT 1024*1024*1024; -- 1e+9; --
+DECLARE tb_divisor FLOAT64 DEFAULT gb_divisor*1024; --1e+12;
+DECLARE cost_per_tb_in_dollar FLOAT64 DEFAULT 6.25;
+DECLARE cost_factor FLOAT64 DEFAULT cost_per_tb_in_dollar / tb_divisor;
+
+
+with vertex_costs as (
+SELECT DISTINCT * from (
+    SELECT  
+        EXTRACT(DAY from DATETIME(creation_time)) day, 
+        EXTRACT(MONTH from DATETIME(creation_time)) month, 
+        EXTRACT(YEAR from DATETIME(creation_time)) year, 
+        user_email,
+        destination_table.project_id, 
+        destination_table.dataset_id, 
+        destination_table.table_id,
+        -- referenced_tables.dataset_id referenced_dataset,
+        -- referenced_tables.table_id referenced_table,
+        job_id, parent_job_id,
+
+        -- PULL QUERY to analyze it later. Pull query FOR PARENT JOB ID if it exists
+        IF(parent_job_id IS NOT NULL, 
+            (SELECT query from  `region-us.INFORMATION_SCHEMA.JOBS` 
+            WHERE user_email  IN ('vertex-pipelines-sa@taylormadegolf.iam.gserviceaccount.com')  
+            AND job_id=jobs.parent_job_id)
+            , query ) 
+          AS query,
+        -- Additional fields if needed
+        -- job_creation_reason.code, statement_type,
+
+        SUM(total_bytes_processed)/tb_divisor processed_TB, 
+        SUM(IFNULL(total_bytes_billed,0))/tb_divisor  billed_TB,  
+        SUM(total_bytes_processed) * cost_factor  as cost_in_dollar
+    FROM
+      `region-us.INFORMATION_SCHEMA.JOBS` jobs  JOIN  unnest(referenced_tables) referenced_tables
+    WHERE user_email  IN ('vertex-pipelines-sa@taylormadegolf.iam.gserviceaccount.com') 
+      AND EXTRACT(date FROM creation_time) ='2025-01-25' 
+    GROUP by  all 
+)
+-- where cost_in_dollar =0
+GROUP BY ALL
+)
+
+SELECT day, month, year, user_email, 
+CASE 
+  WHEN REGEXP_CONTAINS(dataset_id, r'aggregated_vbb') OR REGEXP_CONTAINS( query, r'.aggregated_vbb.') THEN 'VBB'
+  WHEN REGEXP_CONTAINS(dataset_id, r'churn_propensity') OR REGEXP_CONTAINS( query, r'.churn_propensity.')  THEN 'Churn'
+  WHEN REGEXP_CONTAINS(dataset_id, r'purchase_propensity') OR REGEXP_CONTAINS( query, r'.purchase_propensity.') THEN 'Purchase propensity'
+  WHEN REGEXP_CONTAINS(dataset_id, r'auto_audience_segmentation')  OR REGEXP_CONTAINS( query, r'.auto_audience_segmentation.') THEN 
+    -- CASE WHEN REGEXP_CONTAINS(table_id, 'inference_preparation|training_preparation') THEN 'Feature creation - Auto Segmentation'
+    -- ELSE  'Auto Segmentation'
+    -- END
+    'Auto Segmentation'
+  WHEN REGEXP_CONTAINS(dataset_id, r'audience_segmentation') OR REGEXP_CONTAINS( query, r'.audience_segmentation.')  THEN 'Segmentation'
+  WHEN REGEXP_CONTAINS(dataset_id, r'customer_lifetime_value') OR REGEXP_CONTAINS( query, r'.customer_lifetime_value.') THEN 'CLV'
+  WHEN REGEXP_CONTAINS(dataset_id, r'gemini_insights') OR REGEXP_CONTAINS( query, r'.gemini_insights.')   THEN 'Gemini insights'
+  WHEN REGEXP_CONTAINS(dataset_id, r'feature_store')  OR REGEXP_CONTAINS( query, r'.feature_store.')    THEN 
+    -- CASE 
+    --   WHEN REGEXP_CONTAINS(query, 'user_lookback_metrics|user_segmentation_dimensions') THEN 'Segmentation - Feature creation'
+    --   WHEN REGEXP_CONTAINS(query, 'lifetime') THEN 'CLV - Feature creation'
+    --   WHEN REGEXP_CONTAINS(query, 'value_based_bidding') THEN 'VBB - Feature creation'
+    --   WHEN REGEXP_CONTAINS(query, 'purchase_propensity') THEN 'Purchase propensity - Feature creation'
+    --   WHEN REGEXP_CONTAINS(query, 'churn_propensity') THEN 'Churn - Feature creation'
+    --   END 
+    'Feature creation' 
+  WHEN REGEXP_CONTAINS(dataset_id, r'aggregated_predictions') OR REGEXP_CONTAINS( query, r'.aggregated_predictions.') THEN 'Reporting preparations'
+
+  ELSE  dataset_id END as pipeline,
+-- table_id, -- v_purchase_propensity_training_30_30_last_window 
+--  dataset_id,
+--  referenced_table,
+--  referenced_dataset,
+-- job_id, parent_job_id,
+-- query, 
+
+  ROUND(SUM(processed_TB), 4) processed_TB,
+  ROUND(SUM(billed_TB), 4) billed_TB,
+  cost_per_tb_in_dollar as cost_per_TB,
+  ROUND(SUM(cost_in_dollar), 2) cost_in_dollar, 
+  COUNT(*) invocations
+
+FROM vertex_costs
+-- WHERE 
+GROUP BY all
+ORDER BY pipeline
