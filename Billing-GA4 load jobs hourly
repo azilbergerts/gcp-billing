@@ -1,0 +1,34 @@
+-- SELECT  creation_time, date(creation_time, 'EST') date,-- EXTRACT(hour from creation_time) hour, 
+-- destination_table.dataset_id, destination_table.table_id,
+-- sum(total_bytes_processed)/(1024*1024*1024) processed, 
+-- sum(total_bytes_billed)/(1024*1024*1024) billed, 
+-- sum(total_bytes_billed)/(1024*1024*1024)*0.02 total_cost
+WITH load_jobs AS (
+  SELECT LEFT(regexp_extract(job_id, r"events_\D*(\d+)"),8) as date,
+        creation_time,start_time, end_time, destination_table.dataset_id, destination_table.table_id,
+  FROM`region-us.INFORMATION_SCHEMA.JOBS` 
+  WHERE  1=1 AND
+    user_email  IN (
+      'analytics-processing-dev@system.gserviceaccount.com', -- UA
+      'firebase-measurement@system.gserviceaccount.com') -- GA4 , 
+    and date(creation_time) between '2025-03-01' and '2025-04-28'
+    and destination_table.dataset_id='analytics_251341260' --313650722
+    and destination_table.table_id not like '%intraday%'
+    and destination_table.table_id like 'events_fresh%'
+  -- group by 1,2,3,4
+  order by 1 --,hour
+)
+
+SELECT dataset_id, table_id, 
+DATETIME(CAST(LEFT(date,4) AS INT64), CAST(SUBSTRING(date, 5, 2) AS INT64), CAST(RIGHT(date,2) AS INT64), 0, 0, 0) as dt,
+MIN(creation_time) earliest_load_time,
+MAX(creation_time) latest_load_time,
+-- DATE_SUB(MAX(creation_time), MIN(creation_time), INTERVAL HOUR),
+DATETIME_DIFF(MAX(creation_time), MIN(creation_time),  HOUR) loads_delta,
+COUNT(creation_time) num_load_times
+FROM load_jobs
+GROUP BY 1,2,dt
+-- HAVING COUNT(creation_time) >2
+-- HAVING DATETIME_DIFF(MAX(creation_time), MIN(creation_time),  HOUR) >48
+-- OR DATETIME_DIFF(MIN(creation_time) , TIMESTAMP(dt), HOUR) >=69
+ORDER BY dataset_id, table_id DESC
